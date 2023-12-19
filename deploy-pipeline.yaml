@@ -1,0 +1,126 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger: 
+- none 
+variables:
+  IISWebsiteName: 'AzureTestProject'
+
+
+resources:
+ pipelines:
+     - pipeline: 'buildPipeline'
+       project: 'deploy-app'
+       source: 'pipeline'
+       branch: 'main'
+
+stages:
+  - stage: DeployWebsite
+    displayName: 'Deploy website'
+    pool:
+      vmImage: windows-latest
+    
+    jobs:
+    - deployment: DeployWebsite
+      displayName: 'Deploy website'
+      environment: 'Windows 11 server.DESKTOP-NTIAFUB'
+      strategy:
+       runOnce:
+           deploy:
+            steps:
+                - checkout: none
+
+                - download: 'buildPipeline'
+                  name: 'DownloadBuildArtifacts'
+                  displayName: 'Download Build Artifacts'
+                  artifact: 'drop'
+                - powershell: |
+                     New-WebAppPool -Name "FIO"   
+                     New-Website -Name "FIO" -Port 86 -PhysicalPath "C:\fiparatge" -ApplicationPool "FIO"
+                     $ipAddress = (Invoke-RestMethod -Uri "http://ipinfo.io/json").ip
+                     Write-Host "IP Address: $ipAddress"
+                  displayName: 'Create Website, App Pool, Get IP Address'
+                - task: IISWebAppManagementOnMachineGroup@0
+                  name: 'StopIIS'
+                  displayName: 'Stop IIS website'
+                  inputs:
+                    IISDeploymentType: 'IISWebsite'
+                    ActionIISWebsite: 'StopWebsite'
+                    StartStopWebsiteName: '${{ variables.IISWebsiteName }}'
+                - task: IISWebAppDeploymentOnMachineGroup@0
+                  name: 'DeployIIS'
+                  displayName: 'Deploy IIS website'                
+                  inputs:
+                    WebSiteName: '${{ variables.IISWebsiteName }}'
+                    Package: '$(Pipeline.Workspace)\buildPipeline\drop\RoundTheCode.AzureTestProject.zip'
+                    TakeAppOfflineFlag: true
+                - powershell: |
+                    Expand-Archive -Path "$(Pipeline.Workspace)\buildPipeline\drop\RoundTheCode.AzureTestProject.zip" -DestinationPath "$(Pipeline.Workspace)\buildPipeline\drop\ExtractedFiles -Force"
+                  displayName: unzip package 
+                - powershell: |
+                       New-Item -Path "C:\fiparatge" -ItemType Directory
+                       New-Item -Path "C:\fihostaccess" -ItemType Directory
+                  displayName: 'Create fiparatge and  fihosstaccess folder'
+
+                - powershell: |
+                        Move-Item -Path "$(Pipeline.Workspace)\buildPipeline\drop\ExtractedFiles\*" -Destination "C:\fiparatge\" -Force
+                  displayName: 'Move contents to C:\fiparatge'
+                - powershell: |
+                    $file = "$(Pipeline.Workspace)\buildPipeline\drop\ExtractedFiles -Force\web.config"
+                          $oldValue = 'name="$(oldnameresto)" '
+                          $newValue = 'name="$(newnameresto)"'
+                          (Get-Content $file) | ForEach-Object {
+                             $_ -replace $oldValue, $newValue
+                          } | Set-Content $file 
+                  displayName:  editing in a file 
+
+                - powershell: |
+                       New-NetFirewallRule -DisplayName "Allow Port 86 Inbound" -Direction Inbound -LocalPort 86 -Protocol TCP -Action Allow
+                  displayName: 'Allow inbound traffic on port 86'       
+
+              
+
+                - task: IISWebAppManagementOnMachineGroup@0
+                  name: 'StartIIS'
+                  displayName: 'Start IIS website'                     
+                  inputs:
+                    IISDeploymentType: 'IISWebsite'
+                    ActionIISWebsite: 'StartWebsite'
+                    StartStopWebsiteName: '${{ variables.IISWebsiteName }}'
+
+
+                - task: DownloadBuildArtifacts@0    
+                  displayName: Download DacPac
+                  inputs:
+                   buildType: 'current'
+                   downloadType: 'single'
+                   artifactName: 'dacpac'
+                   itemPattern: '**/*.dacpac'
+                   downloadPath: '$(System.DefaultWorkingDirectory)'
+                  
+
+                - task: CopyFiles@2  
+                  inputs:
+                    SourceFolder: '$(Build.SourcesDirectory)/$(database-path)'  
+                    Contents: '**'  
+                    TargetFolder: '$(Agent.BuildDirectory)' 
+                - task: PowerShell@2
+                  displayName: 'Execute SQL Script'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+               
+                      $SqlScriptPath = '$(Agent.BuildDirectory)\$(PATH-SCRIPT)'  
+                      $SqlScriptContent = Get-Content -Path $SqlScriptPath -Raw
+
+                       try {
+                         # Connect to SQL Server and execute the script
+                         sqlcmd -S $ServerName -d $(Database)  -U $(Username) -P $(Password) -i $SqlScriptPath  
+                         
+                       } catch {
+                         Write-Error "Error executing SQL Script: $_"
+                           exit 1
+                       }  
+                                 

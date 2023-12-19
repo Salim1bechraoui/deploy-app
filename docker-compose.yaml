@@ -1,0 +1,43 @@
+version: '3'
+
+services:
+  employee-jdbc-container1:
+    image: salimbechraoui25/backend:1.0
+    container_name: employee-jdbc-container1
+    ports:
+      - "8080:8080"
+    networks:
+      - backend
+      - frontend
+  
+    depends_on:
+      - mysqldb
+ 
+  mysqldb:
+    image: mysql:8
+    networks:
+      - backend
+    restart: always
+    container_name: mysqldb
+    environment:
+      - MYSQL_ROOT_PASSWORD=salimbackend
+      - MYSQL_DATABASE=springboot
+
+
+  angular-service: # name of the first service
+    image: salimbechraoui25/frontend:1.0
+    container_name: angular-container2
+   
+    volumes: # Volume binding
+      - './:/usr/src'
+    ports:
+      - "4200:80" # specify port forewarding
+    networks:
+      -  frontend
+    depends_on:
+      - employee-jdbc-container1
+
+
+networks:
+  frontend:
+  backend:

@@ -1,0 +1,5 @@
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic fzix6vnueqbncleykycrhkkocpb7klzhhxcu3a3pdmshtasob6cq" \
+  -d '{"definition": {"id": 15}}' \
+  "https://dev.azure.com/salimb0870/deploy-app/_apis/build/builds?api-version=6.0"
